@@ -29,3 +29,23 @@ class QNetwork(nn.Module):
         return self.net(x)
     
     
+
+class ReplayBuffer:
+    """Fixed-size cyclic buffer storing past transitions for experience replay."""
+ 
+    def __init__(self, capacity: int):
+        self.buffer = deque(maxlen=capacity)
+ 
+    def push(self, *args):
+        self.buffer.append(Transition(*args))
+ 
+    def sample(self, batch_size: int):
+        return random.sample(self.buffer, batch_size)
+ 
+    def __len__(self):
+        return len(self.buffer)
+    
+
+
+class DQNAgent:
+    
