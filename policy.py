@@ -83,3 +83,53 @@ class DQNAgent:
         self.loss_fn = nn.SmoothL1Loss()  # Huber loss
  
         self.memory = ReplayBuffer(buffer_capacity)
+
+ 
+    def select_action(self, state: np.ndarray, greedy: bool = False) -> int:
+        if not greedy and random.random() < self.eps:
+            return random.randrange(self.n_actions)
+        with torch.no_grad():
+            state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            q_values = self.policy_net(state_t)
+            return int(q_values.argmax(dim=1).item())
+        
+    def decay_epsilon(self):
+        self.eps = max(self.eps_end, self.eps * self.eps_decay)
+ 
+    def store(self, *args):
+        self.memory.push(*args)
+
+ 
+    def optimize(self):
+        if len(self.memory) < self.batch_size:
+            return None
+ 
+        batch = self.memory.sample(self.batch_size)
+        batch = Transition(*zip(*batch))
+ 
+        states = torch.as_tensor(np.array(batch.state), dtype=torch.float32, device=self.device)
+        actions = torch.as_tensor(batch.action, dtype=torch.int64, device=self.device).unsqueeze(1)
+        rewards = torch.as_tensor(batch.reward, dtype=torch.float32, device=self.device).unsqueeze(1)
+        next_states = torch.as_tensor(np.array(batch.next_state), dtype=torch.float32, device=self.device)
+        dones = torch.as_tensor(batch.done, dtype=torch.float32, device=self.device).unsqueeze(1)
+ 
+        # Q(s, a) for the actions actually taken
+        q_values = self.policy_net(states).gather(1, actions)
+ 
+        # Target: r + gamma * max_a' Q_target(s', a') * (1 - done)
+        with torch.no_grad():
+            next_q_values = self.target_net(next_states).max(dim=1, keepdim=True)[0]
+            targets = rewards + self.gamma * next_q_values * (1.0 - dones)
+ 
+        loss = self.loss_fn(q_values, targets)
+ 
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10.0)
+        self.optimizer.step()
+ 
+        return loss.item()
+ 
+    def maybe_update_target(self, episode: int):
+        if episode % self.target_update_freq == 0:
+            self.target_net.load_state_dict(self.policy_net.state_dict())
