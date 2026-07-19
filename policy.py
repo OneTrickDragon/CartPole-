@@ -133,3 +133,110 @@ class DQNAgent:
     def maybe_update_target(self, episode: int):
         if episode % self.target_update_freq == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
+
+ 
+def train(
+    n_episodes: int = 400,
+    max_steps: int = 500,
+    solved_reward: float = 475.0,
+    solved_window: int = 20,
+    seed: int = 0,
+):
+    env = gym.make("CartPole-v1")
+    state_dim = env.observation_space.shape[0]
+    n_actions = env.action_space.n
+ 
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+ 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    agent = DQNAgent(state_dim, n_actions, device)
+ 
+    episode_rewards = []
+ 
+    for episode in range(1, n_episodes + 1):
+        state, _ = env.reset(seed=seed + episode)
+        episode_reward = 0.0
+ 
+        for _ in range(max_steps):
+            action = agent.select_action(state)
+            next_state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+ 
+            agent.store(state, action, reward, next_state, float(done))
+            state = next_state
+            episode_reward += reward
+ 
+            agent.optimize()
+ 
+            if done:
+                break
+ 
+        agent.decay_epsilon()
+        agent.maybe_update_target(episode)
+        episode_rewards.append(episode_reward)
+ 
+        avg_recent = np.mean(episode_rewards[-solved_window:])
+        if episode % 10 == 0 or episode == 1:
+            print(
+                f"Episode {episode:4d} | Reward: {episode_reward:6.1f} | "
+                f"Avg({solved_window}): {avg_recent:6.1f} | Epsilon: {agent.eps:.3f}"
+            )
+ 
+        if len(episode_rewards) >= solved_window and avg_recent >= solved_reward:
+            print(f"\nSolved at episode {episode}! Average reward: {avg_recent:.1f}")
+            break
+ 
+    env.close()
+ 
+    torch.save(agent.policy_net.state_dict(), "/mnt/user-data/outputs/dqn_cartpole_weights.pt")
+ 
+    plt.figure(figsize=(9, 5))
+    plt.plot(episode_rewards, alpha=0.4, label="Episode reward")
+    if len(episode_rewards) >= solved_window:
+        moving_avg = np.convolve(
+            episode_rewards, np.ones(solved_window) / solved_window, mode="valid"
+        )
+        plt.plot(
+            range(solved_window - 1, len(episode_rewards)),
+            moving_avg,
+            label=f"{solved_window}-episode moving average",
+            linewidth=2,
+        )
+    plt.axhline(solved_reward, color="red", linestyle="--", label="Solved threshold")
+    plt.xlabel("Episode")
+    plt.ylabel("Total reward")
+    plt.title("DQN on CartPole-v1")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("/mnt/user-data/outputs/training_rewards.png", dpi=120)
+ 
+    return agent, episode_rewards
+ 
+ 
+def watch(agent: DQNAgent, n_episodes: int = 3):
+    env = gym.make("CartPole-v1", render_mode="human")
+    for ep in range(n_episodes):
+        state, _ = env.reset()
+        done = False
+        total_reward = 0.0
+        while not done:
+            action = agent.select_action(state, greedy=True)
+            state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+            total_reward += reward
+        print(f"[Render] Episode {ep + 1}: reward = {total_reward}")
+    env.close()
+ 
+ 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train a DQN agent on CartPole-v1")
+    parser.add_argument("--episodes", type=int, default=400)
+    parser.add_argument("--render", action="store_true", help="Render a few episodes after training")
+    args = parser.parse_args()
+ 
+    trained_agent, rewards = train(n_episodes=args.episodes)
+ 
+    if args.render:
+        watch(trained_agent)
