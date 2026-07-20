@@ -190,7 +190,7 @@ def train(
  
     env.close()
  
-    torch.save(agent.policy_net.state_dict(), "C:\Users\arjun\Cartpole")
+    torch.save(agent.policy_net.state_dict(), "Cartpole/")
  
     plt.figure(figsize=(9, 5))
     plt.plot(episode_rewards, alpha=0.4, label="Episode reward")
